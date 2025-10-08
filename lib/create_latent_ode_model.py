@@ -10,13 +10,14 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import relu
 
-import lib.utils as utils
-from lib.latent_ode import LatentODE
-from lib.encoder_decoder import *
-from lib.diffeq_solver import DiffeqSolver
+from . import utils
+from .latent_ode import LatentODE
+from .encoder_decoder import *
+from .diffeq_solver import DiffeqSolver
+from .ode_func import ODEFunc, ODEFunc_w_Poisson
 
 from torch.distributions.normal import Normal
-from lib.ode_func import ODEFunc, ODEFunc_w_Poisson
+
 
 #####################################################################################################
 
@@ -51,7 +52,9 @@ def create_LatentODE_model(args, input_dim, z0_prior, obsrv_std, device,
 
 	z0_diffeq_solver = None
 	n_rec_dims = args.rec_dims
-	enc_input_dim = int(input_dim) * 2 # we concatenate the mask
+	# enc_input_dim = (int(input_dim) + 3) * 2 # we add the static values then concatenate the mask
+	enc_input_dim = int(input_dim) + 1 # we concatenate the dose and other (dynamic) covariates
+
 	gen_data_dim = input_dim
 
 	z0_dim = args.latents

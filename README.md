@@ -93,3 +93,4 @@ python3 run_models.py --niters 500 -n 100  -b 30 -l 10 --dataset periodic  --cla
 ```
 python3 run_models.py --niters 100 -n 5000 -b 100 -l 3 --dataset periodic --latent-ode --noise-weight 0.5 --lr 0.01 --viz --rec-layers 2 --gen-layers 2 -u 100 -c 30
 ```
+# PharmaNODE

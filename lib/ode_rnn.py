@@ -8,9 +8,10 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import relu
 
-import lib.utils as utils
-from lib.encoder_decoder import *
-from lib.likelihood_eval import *
+from . import utils
+from .encoder_decoder import *
+from .likelihood_eval import *
+from .base_models import Baseline
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.normal import Normal
@@ -19,7 +20,7 @@ from torch.nn.modules.rnn import GRUCell, LSTMCell, RNNCellBase
 from torch.distributions.normal import Normal
 from torch.distributions import Independent
 from torch.nn.parameter import Parameter
-from lib.base_models import Baseline
+
 
 
 class ODE_RNN(Baseline):

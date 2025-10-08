@@ -7,11 +7,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.functional import relu
-
-import lib.utils as utils
-from lib.utils import get_device
-from lib.encoder_decoder import *
-from lib.likelihood_eval import *
+from . import utils
+from .utils import get_device
+from .encoder_decoder import *
+from .likelihood_eval import *
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.normal import Normal
@@ -20,7 +19,7 @@ from torch.nn.modules.rnn import GRUCell, LSTMCell, RNNCellBase
 from torch.distributions.normal import Normal
 from torch.distributions import Independent
 from torch.nn.parameter import Parameter
-from lib.base_models import Baseline, VAE_Baseline
+from .base_models import Baseline, VAE_Baseline
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 # Exponential decay of the hidden states for RNN

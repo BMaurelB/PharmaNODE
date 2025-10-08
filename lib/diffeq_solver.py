@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import lib.utils as utils
+from . import utils
 from torch.distributions.multivariate_normal import MultivariateNormal
 
 # git clone https://github.com/rtqichen/torchdiffeq.git

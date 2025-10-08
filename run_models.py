@@ -10,6 +10,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot
 import matplotlib.pyplot as plt
 
+
+from torch.utils.tensorboard import SummaryWriter
+
 import time
 import datetime
 import argparse
@@ -35,13 +38,12 @@ from lib.diffeq_solver import DiffeqSolver
 from mujoco_physics import HopperPhysics
 
 from lib.utils import compute_loss_all_batches
-
 # Generative model for noisy data based on ODE
 parser = argparse.ArgumentParser('Latent ODE')
 parser.add_argument('-n',  type=int, default=100, help="Size of the dataset")
-parser.add_argument('--niters', type=int, default=300)
+parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lr',  type=float, default=1e-2, help="Starting learning rate.")
-parser.add_argument('-b', '--batch-size', type=int, default=50)
+parser.add_argument('-b', '--batch-size', type=int, default=200)
 parser.add_argument('--viz', action='store_true', help="Show plots while training")
 
 parser.add_argument('--save', type=str, default='experiments/', help="Path for save checkpoints")
@@ -86,8 +88,11 @@ parser.add_argument('--extrap', action='store_true', help="Set extrapolation mod
 
 parser.add_argument('-t', '--timepoints', type=int, default=100, help="Total number of time-points")
 parser.add_argument('--max-t',  type=float, default=5., help="We subsample points in the interval [0, args.max_tp]")
-parser.add_argument('--noise-weight', type=float, default=0.01, help="Noise amplitude for generated traejctories")
-
+parser.add_argument('--noise-weight', type=float, default=0.04, help="Noise amplitude for generated traejctories")
+parser.add_argument('--seed', type = int, default = 15, help="Fix seed for reproducibility")
+parser.add_argument('--experiment', type = str, default = None, help="Fix experiment number for reproducibility")
+parser.add_argument('--patience', type=int, default=10000, help='Patience for early stopping')
+parser.add_argument('--smoothing_factor', type=float, default=0.01, help='Smoothing factor for EMA of test MSE')
 
 args = parser.parse_args()
 
@@ -98,18 +103,21 @@ utils.makedirs(args.save)
 #####################################################################################################
 
 if __name__ == '__main__':
-	torch.manual_seed(args.random_seed)
-	np.random.seed(args.random_seed)
-
+	# torch.manual_seed(args.random_seed)
+	# np.random.seed(args.random_seed)
+	torch.manual_seed(args.seed)
+	seed = np.random.seed(args.seed)
 	experimentID = args.load
+
 	if experimentID is None:
 		# Make a new experiment ID
-		experimentID = int(SystemRandom().random()*100000)
+		experimentID = int(args.experiment)
+		if experimentID is None:
+			experimentID = int(SystemRandom().random()*100000)
 	ckpt_path = os.path.join(args.save, "experiment_" + str(experimentID) + '.ckpt')
 
 	start = time.time()
 	print("Sampling dataset of {} training examples".format(args.n))
-	
 	input_command = sys.argv
 	ind = [i for i in range(len(input_command)) if input_command[i] == "--load"]
 	if len(ind) == 1:
@@ -235,7 +243,7 @@ if __name__ == '__main__':
 	#Load checkpoint and evaluate the model
 	if args.load is not None:
 		utils.get_ckpt_model(ckpt_path, model, device)
-		exit()
+		# exit()
 
 	##################################################################
 	# Training
@@ -249,82 +257,164 @@ if __name__ == '__main__':
 	optimizer = optim.Adamax(model.parameters(), lr=args.lr)
 
 	num_batches = data_obj["n_train_batches"]
+	
+	tensorboard_log_dir = os.path.join(args.save, "runs", str(experimentID))
+	writer = SummaryWriter(tensorboard_log_dir)
+	print(f"TensorBoard logs will be saved to: {tensorboard_log_dir}")
 
-	for itr in range(1, num_batches * (args.niters + 1)):
-		optimizer.zero_grad()
-		utils.update_learning_rate(optimizer, decay_rate = 0.999, lowest = args.lr / 10)
-
-		wait_until_kl_inc = 10
-		if itr // num_batches < wait_until_kl_inc:
-			kl_coef = 0.
-		else:
-			kl_coef = (1-0.99** (itr // num_batches - wait_until_kl_inc))
-
-		batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
-		train_res = model.compute_all_losses(batch_dict, n_traj_samples = 3, kl_coef = kl_coef)
-		train_res["loss"].backward()
-		optimizer.step()
-
-		n_iters_to_viz = 1
-		if itr % (n_iters_to_viz * num_batches) == 0:
-			with torch.no_grad():
-
-				test_res = compute_loss_all_batches(model, 
-					data_obj["test_dataloader"], args,
-					n_batches = data_obj["n_test_batches"],
-					experimentID = experimentID,
-					device = device,
-					n_traj_samples = 3, kl_coef = kl_coef)
-
-				message = 'Epoch {:04d} [Test seq (cond on sampled tp)] | Loss {:.6f} | Likelihood {:.6f} | KL fp {:.4f} | FP STD {:.4f}|'.format(
-					itr//num_batches, 
-					test_res["loss"].detach(), test_res["likelihood"].detach(), 
-					test_res["kl_first_p"], test_res["std_first_p"])
-		 	
-				logger.info("Experiment " + str(experimentID))
-				logger.info(message)
-				logger.info("KL coef: {}".format(kl_coef))
-				logger.info("Train loss (one batch): {}".format(train_res["loss"].detach()))
-				logger.info("Train CE loss (one batch): {}".format(train_res["ce_loss"].detach()))
-				
-				if "auc" in test_res:
-					logger.info("Classification AUC (TEST): {:.4f}".format(test_res["auc"]))
-
-				if "mse" in test_res:
-					logger.info("Test MSE: {:.4f}".format(test_res["mse"]))
-
-				if "accuracy" in train_res:
-					logger.info("Classification accuracy (TRAIN): {:.4f}".format(train_res["accuracy"]))
-
-				if "accuracy" in test_res:
-					logger.info("Classification accuracy (TEST): {:.4f}".format(test_res["accuracy"]))
-
-				if "pois_likelihood" in test_res:
-					logger.info("Poisson likelihood: {}".format(test_res["pois_likelihood"]))
-
-				if "ce_loss" in test_res:
-					logger.info("CE loss: {}".format(test_res["ce_loss"]))
-
-			torch.save({
-				'args': args,
-				'state_dict': model.state_dict(),
-			}, ckpt_path)
+### Early Stopping Initialization ###
+# Add this to your argument parser: parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
+patience = args.patience
+smoothing_factor = args.smoothing_factor # e.g., 0.1
+early_stop_counter = 0
 
 
-			# Plotting
-			if args.viz:
-				with torch.no_grad():
-					test_dict = utils.get_next_batch(data_obj["test_dataloader"])
+smoothed_test_mse = float('inf') # Initialize to infinity for the first EMA calculation
+best_smoothed_test_mse = float('inf') # Tracks the best smoothed MSE encountered
+# Define a path for the best model checkpoint
+best_ckpt_path = ckpt_path.replace('.ckpt', '_best.ckpt')
+### End of Initialization ###
+for itr in range(1, num_batches * (args.niters + 1)):
+    optimizer.zero_grad()
+    utils.update_learning_rate(optimizer, decay_rate = 0.999, lowest = args.lr / 10)
 
-					print("plotting....")
-					if isinstance(model, LatentODE) and (args.dataset == "periodic"): #and not args.classic_rnn and not args.ode_rnn:
-						plot_id = itr // num_batches // n_iters_to_viz
-						viz.draw_all_plots_one_dim(test_dict, model, 
-							plot_name = file_name + "_" + str(experimentID) + "_{:03d}".format(plot_id) + ".png",
-						 	experimentID = experimentID, save=True)
-						plt.pause(0.01)
-	torch.save({
-		'args': args,
-		'state_dict': model.state_dict(),
-	}, ckpt_path)
+    wait_until_kl_inc = 10
+    if itr // num_batches < wait_until_kl_inc:
+        kl_coef = 0.
+    else:
+        kl_coef = (1-0.99** (itr // num_batches - wait_until_kl_inc))
 
+    batch_dict = utils.get_next_batch(data_obj["train_dataloader"])
+    train_res = model.compute_all_losses(batch_dict, n_traj_samples = 3, kl_coef = kl_coef)
+    train_res["loss"].backward()
+    optimizer.step()
+
+    n_iters_to_viz = 1000
+    if itr % (n_iters_to_viz * num_batches) == 0:
+        with torch.no_grad():
+
+            test_res = compute_loss_all_batches(model, 
+                data_obj["test_dataloader"], args,
+                n_batches = data_obj["n_test_batches"],
+                experimentID = experimentID,
+                device = device,
+                n_traj_samples = 10, kl_coef = kl_coef, data_obj = data_obj)
+            
+            message = 'Epoch {:04d} [Test seq (cond on sampled tp)] | Loss {:.6f} | Likelihood {:.6f} | KL fp {:.4f} | FP STD {:.4f}|'.format(
+                itr//num_batches, 
+                test_res["loss"].detach(), test_res["likelihood"].detach(), 
+                test_res["kl_first_p"], test_res["std_first_p"])
+        
+            logger.info("Experiment " + str(experimentID))
+            logger.info(message)
+            logger.info("KL coef: {}".format(kl_coef))
+            logger.info("Train loss (one batch): {}".format(train_res["loss"].detach()))
+            logger.info("Train CE loss (one batch): {}".format(train_res["ce_loss"].detach()))
+            
+            if "auc" in test_res:
+                logger.info("Classification AUC (TEST): {:.4f}".format(test_res["auc"]))
+
+            # --- MSE and Early Stopping Logic (Modified for Smoothing) ---
+            if "mse" in test_res:
+                current_raw_mse = test_res["mse"].item() # Get the raw current MSE
+                logger.info("Test MSE (raw): {:.4f}".format(current_raw_mse))
+                
+                ### Calculate Exponential Moving Average of Test MSE ###
+                if smoothed_test_mse == float('inf'): # For the very first evaluation
+                    smoothed_test_mse = current_raw_mse
+                else:
+                    smoothed_test_mse = (current_raw_mse * smoothing_factor) + \
+                                        (smoothed_test_mse * (1 - smoothing_factor))
+                
+                logger.info(f"Test MSE (smoothed with alpha={smoothing_factor}): {smoothed_test_mse:.4f}")
+
+                ### EARLY STOPPING CHECK against Smoothed MSE ###
+                if smoothed_test_mse < best_smoothed_test_mse:
+                    best_smoothed_test_mse = smoothed_test_mse
+                    early_stop_counter = 0
+                    logger.info(f"New best smoothed test MSE: {best_smoothed_test_mse:.4f}. Saving best model to {best_ckpt_path}")
+                    # Save the model state when a new best smoothed MSE is achieved
+                    torch.save({
+                        'args': args,
+                        'state_dict': model.state_dict(),
+                        'epoch': itr//num_batches,
+                        'raw_test_mse_at_best': current_raw_mse, # Store raw MSE for context
+                        'smoothed_test_mse': best_smoothed_test_mse
+                    }, best_ckpt_path)
+                else:
+                    early_stop_counter += 1
+                    logger.info(f"Smoothed Test MSE did not improve. Early stopping counter: {early_stop_counter}/{patience}")
+
+                if early_stop_counter >= patience and itr > 2000:
+                    logger.info("Early stopping triggered: Smoothed Test MSE has not improved for {} epochs.".format(patience))
+                    break # Exit the main training loop
+                ### END OF EARLY STOPPING CHECK ###
+
+                for i in range(4):
+                    logger.info("Test MSE group_{}: {:.4f}".format(i,test_res["mse_cond"][i]))
+
+            if "accuracy" in train_res:
+                logger.info("Classification accuracy (TRAIN): {:.4f}".format(train_res["accuracy"]))
+
+            if "accuracy" in test_res:
+                logger.info("Classification accuracy (TEST): {:.4f}".format(test_res["accuracy"]))
+
+            if "pois_likelihood" in test_res:
+                logger.info("Poisson likelihood: {}".format(test_res["pois_likelihood"]))
+
+            if "ce_loss" in test_res:
+                logger.info("CE loss: {}".format(test_res["ce_loss"]))
+
+            # --- TensorBoard Logging ---
+            writer.add_scalar('Loss/train_total_loss', train_res["loss"].item(), itr)
+            if "mse" in train_res:
+                writer.add_scalar('MSE/train', train_res["mse"].item(), itr)
+                for i in range(4):
+                    logger.info("train MSE group_{}: {:.4f}".format(i,train_res["mse_cond"][i]))
+            if "ce_loss" in train_res and not torch.isnan(train_res["ce_loss"]):
+                    writer.add_scalar('Loss/train_ce_loss', train_res["ce_loss"].item(), itr)
+
+            writer.add_scalar('Loss/test_total_loss', test_res["loss"].item(), itr)
+            writer.add_scalar('Likelihood/test', test_res["likelihood"].item(), itr)
+
+            if "mse" in test_res:
+                writer.add_scalar('MSE/test_raw', current_raw_mse, itr) # Log raw MSE
+                # writer.add_scalar('MSE/test_smoothed', smoothed_test_mse, itr) # Log smoothed MSE
+            if "rmse_auc" in test_res:
+                writer.add_scalar('MSE/rmse_auc', test_res["rmse_auc"].item(), itr) # Log raw MSE
+            if "ce_loss" in test_res and not torch.isnan(test_res["ce_loss"]):
+                logger.info("CE loss (TEST): {}".format(test_res["ce_loss"]))
+                writer.add_scalar('Loss/test_ce_loss', test_res["ce_loss"].item(), itr)
+            writer.flush()
+        
+        # --- Save Latest Checkpoint ---
+        torch.save({
+            'args': args,
+            'state_dict': model.state_dict(),
+        }, ckpt_path)
+
+
+        # Plotting
+        if args.viz and itr%1000 == 0 :
+            with torch.no_grad():
+                test_dict = utils.get_next_batch(data_obj["test_dataloader"])
+
+                print("plotting....")
+                if isinstance(model, LatentODE) and (args.dataset == "periodic") or (args.dataset == "PK_Example") or (args.dataset == 'PK_Tacro') or (args.dataset == 'PK_MMF'):
+                    plot_id = itr // num_batches // n_iters_to_viz
+                    viz.draw_all_plots_one_dim(test_dict, model, 
+                        plot_name = file_name + "_" + str(experimentID) + "_{:03d}".format(plot_id) + ".png",
+                        experimentID = experimentID, save=True)
+                    plt.pause(0.01)
+
+torch.save({
+    'args': args,
+    'state_dict': model.state_dict(),
+}, ckpt_path)
+
+writer.close()
+print("Training complete. TensorBoard writer closed.")
+if best_smoothed_test_mse != float('inf'):
+    print(f"Best model (based on smoothed MSE) saved to {best_ckpt_path} with smoothed Test MSE: {best_smoothed_test_mse:.4f}")
+else:
+    print("Training finished, but no 'best' model was saved as MSE was not tracked or training ended early.")

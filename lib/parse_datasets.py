@@ -8,23 +8,24 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-
+import pandas as pd
 import lib.utils as utils
 from lib.diffeq_solver import DiffeqSolver
-from generate_timeseries import Periodic_1d
+from generate_timeseries import Periodic_1d, PKExample
 from torch.distributions import uniform
 
 from torch.utils.data import DataLoader
 from mujoco_physics import HopperPhysics
 from physionet import PhysioNet, variable_time_collate_fn, get_data_min_max
 from person_activity import PersonActivity, variable_time_collate_fn_activity
+from lib.read_tacro import TacroDataset, collate_fn_tacro, create_dataset, extract_in_val_mmf, extract_tls, extract_pccp, extract_pigrec, extract_ped, extract_stablocine, extract_concept, extract_stimmugrep, extract_theo, extract_pccp_tac, extract_aadapt_tac, extract_gen_tac
 
 from sklearn import model_selection
 import random
 
 #####################################################################################################
 def parse_datasets(args, device):
-	
+	random.seed(args.seed)
 
 	def basic_collate_fn(batch, time_steps, args = args, device = device, data_type = "train"):
 		batch = torch.stack(batch)
@@ -37,7 +38,6 @@ def parse_datasets(args, device):
 
 
 	dataset_name = args.dataset
-
 	n_total_tp = args.timepoints + args.extrap
 	max_t_extrap = args.max_t / args.timepoints * n_total_tp
 
@@ -150,6 +150,162 @@ def parse_datasets(args, device):
 					"n_labels": 1} #optional
 		return data_objects
 
+
+	##################################################################
+	# PK Tacro dataset
+	if dataset_name == 'PK_Tacro' or dataset_name == 'PK_MMF' or dataset_name == 'Theo':
+		train = True
+		# train = False
+		test = 1- train
+		if dataset_name == 'PK_Tacro':
+			# data_dict_1, max_out_1 = create_dataset("/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/Adv_dev_2.csv", "/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/adv_foie_p2_JD.csv")
+			# data_dict_2, max_out_2 = create_dataset("/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/Adv_dev_3.csv", "/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-56/validation_modele_vs_trapeze/tacro_foie/adv_foie_p3_JD.csv")
+			# dataset_obj = {**data_dict_1, **data_dict_2}
+			# max_out = max(max_out_1, max_out_2)
+			# # dataset_obj, max_out = extract_tls()
+			# # dataset_obj, max_out = extract_pccp()
+			# # max_out = np.array(max_out_list_train)
+			available_datasets = {
+			'pccp': extract_pccp_tac, 'aadapt' : extract_aadapt_tac, 'gen_tac': extract_gen_tac
+		}
+			# datasets_to_load_train = ['pccp']
+			# datasets_to_load = ['pccp']
+			# datasets_to_load = ['aadapt', 'pccp']
+			
+			datasets_to_load_train = ['gen_tac']
+			datasets_to_load = ['gen_tac']
+			dict_list = []
+			dict_list_train = []
+			max_out_list = []
+			max_out_list_train = []
+			dataset_obj = {}
+			dataset_obj_train = {}
+			
+			for name in datasets_to_load:
+				if name in available_datasets:
+					# Get the correct function from the map
+					extract_function = available_datasets[name]
+					# Call the function and get the results
+					data_dict, max_out_value = extract_function(plot=False, exp = args.experiment)
+					if name not in datasets_to_load_train:
+						dict_list.append(data_dict)
+					dataset_obj.update(data_dict) # Merge dictionaries
+					max_out_list.append(max_out_value)
+				if name in datasets_to_load_train:
+					# Get the correct function from the map
+					extract_function = available_datasets[name]
+					# Call the function and get the results
+					data_dict, max_out_value = extract_function(plot=False, exp = args.experiment)
+					# Collect the results
+					dict_list_train.append(data_dict)
+					max_out_list_train.append(max_out_value)
+		elif dataset_name == 'Theo':
+			dict_list_train, max_out_list_train = extract_theo(plot=False)
+			dataset_obj = dict_list_train
+		else:
+			# dataset_obj, max_out = extract_in_val_mmf("/Users/benjaminmaurel/Documents/Data_LG/FileSenderDownload_7-2-2025__9-5-23/mmfall.csv")
+			available_datasets = {
+			'pccp': extract_pccp,
+			'pigrec': extract_pigrec,
+			'concept': extract_concept,
+			'stablocine': extract_stablocine,
+			'ped': extract_ped,
+			'stimmugrep': extract_stimmugrep,
+		}
+			datasets_to_load_train = ['pccp']
+			datasets_to_load = ['pccp', 'pigrec', 'concept', 'stablocine', 'ped', 'stimmugrep']
+			dict_list = []
+			dict_list_train = []
+			max_out_list = []
+			max_out_list_train = []
+			dataset_obj = {}
+			dataset_obj_train = {}
+			
+			for name in datasets_to_load:
+				if name in available_datasets:
+					# Get the correct function from the map
+					extract_function = available_datasets[name]
+					
+					# Call the function and get the results
+					data_dict, max_out_value = extract_function(plot=False)
+					if name not in datasets_to_load_train:
+						dict_list.append(data_dict)
+					dataset_obj.update(data_dict) # Merge dictionaries
+					max_out_list.append(max_out_value)
+				if name in datasets_to_load_train:
+					# Get the correct function from the map
+					extract_function = available_datasets[name]
+					# Call the function and get the results
+					data_dict, max_out_value = extract_function(plot=False)
+					
+					# Collect the results
+					dict_list_train.append(data_dict)
+					max_out_list_train.append(max_out_value)
+			# data_dict_0, max_out_0 = extract_pccp(plot = False)
+			# data_dict_1, max_out_1 = extract_pigrec(plot = False)
+			# data_dict_2, max_out_2 = extract_concept(plot = False)
+			# data_dict_3, max_out_3 = extract_stablocine(plot = False)
+			# data_dict_4, max_out_4 = extract_ped(plot = False)
+			# data_dict_5, max_out_5 = extract_stimmugrep(plot = False)
+			
+			# max_out = np.array([max_out_0,  max_out_1, max_out_2, max_out_3, max_out_4, max_out_5])
+			# dataset_obj = {**data_dict_0, **data_dict_1, **data_dict_2, **data_dict_3, **data_dict_4, **data_dict_5}
+			# dict_list = [data_dict_0, data_dict_1, data_dict_2, data_dict_3, data_dict_4, data_dict_5]
+			# max_out = np.array([max_out_0, max_out_2, max_out_4])
+			# dataset_obj = {**data_dict_0, **data_dict_2, **data_dict_4}
+			# dict_list = [data_dict_0, data_dict_2, data_dict_4]
+		max_out = {}
+		if not isinstance(max_out_list[0], float):
+			_max_out_list = []
+			_best_lambda = []
+			for list in max_out_list:
+				_max_out_list.append(max_out_list[0][0])
+				_best_lambda.append(max_out_list[0][1])
+			max_out_list = _max_out_list
+			max_out['best_lambda'] = np.array(_best_lambda)
+		max_out['max_out']=  np.array(max_out_list)
+		if datasets_to_load_train == ['gen_tac']:
+			train_keys, test_keys = utils.virtual_train_test_list_dict(dict_list_train, train_fraq = 0.2)
+		else:
+			train_keys, test_keys = utils.split_train_test_list_dict(dict_list_train, train_fraq = 0.8)
+		if test == 1:
+			# test_keys = []
+			_, test_keys_2 =  utils.split_train_test_list_dict(dict_list, train_fraq = 0.0, shuffle = False)
+			try:
+				test_keys.extend(test_keys_2)
+			except:
+				test_keys = test_keys_2
+			# max_out = np.array(max_out_list)
+		print('##############', test_keys)
+		ids_df = pd.DataFrame({'ID': test_keys})
+		# Save the DataFrame to a CSV file.
+		# The index=False part is important to avoid an extra unnamed column.
+		ids_df.to_csv('/Users/benjaminmaurel/Downloads/ids_to_keep.csv', index=False)
+
+		dataset_train = TacroDataset({k: dataset_obj[k] for k in train_keys})
+		dataset_test = TacroDataset({k: dataset_obj[k] for k in test_keys})
+		n_samples = len(train_keys) + len(test_keys)
+		print(n_samples)
+		
+		input_dim = 1
+		# input_dim = 1
+		batch_size = min(args.batch_size, args.n)
+		train_dataloader = DataLoader(dataset_train, batch_size = batch_size, shuffle=False,
+			collate_fn= lambda batch: collate_fn_tacro(batch, args = args, data_type = "train", device = device))
+		test_dataloader = DataLoader(dataset_test, batch_size = args.n, shuffle=False,
+			collate_fn= lambda batch: collate_fn_tacro(batch, args = args, data_type = "test", device = device))
+		
+		data_objects = {"dataset_train": dataset_train,
+					"dataset_test": dataset_test,
+					"train_dataloader": utils.inf_generator(train_dataloader), 
+					"test_dataloader": utils.inf_generator(test_dataloader),
+					"input_dim": input_dim,
+					"n_train_batches": len(train_dataloader),
+					"n_test_batches": len(test_dataloader), "max_out": max_out}
+		return data_objects
+
+
+
 	##################################################################
 	# Human activity dataset
 
@@ -206,6 +362,8 @@ def parse_datasets(args, device):
 			final_amplitude = 1., final_freq = None, 
 			z0 = 1.)
 
+	if dataset_name == 'PK_Example':
+		dataset_obj = PKExample(max_t = args.max_t)
 	##################################################################
 
 	if dataset_obj is None:

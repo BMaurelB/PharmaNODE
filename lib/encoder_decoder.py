@@ -7,11 +7,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.functional import relu
-import lib.utils as utils
 from torch.distributions import Categorical, Normal
-import lib.utils as utils
+from . import utils
 from torch.nn.modules.rnn import LSTM, GRU
-from lib.utils import get_device
+from .utils import get_device
 
 
 # GRU description: 
@@ -173,7 +172,7 @@ class Encoder_z0_ODE_RNN(nn.Module):
 	# Compute a weighted sum of y_i from data and y_i from ode. Use weighted y_i as an initial value for ODE runing from t_i to t_i-1
 	# Continue until we get to z0
 	def __init__(self, latent_dim, input_dim, z0_diffeq_solver = None, 
-		z0_dim = None, GRU_update = None, 
+		z0_dim = None, GRU_update = None, mask = False,
 		n_gru_units = 100, 
 		device = torch.device("cpu")):
 		
@@ -188,7 +187,8 @@ class Encoder_z0_ODE_RNN(nn.Module):
 			self.GRU_update = GRU_unit(latent_dim, input_dim, 
 				n_units = n_gru_units, 
 				device=device).to(device)
-		else:
+
+		else:	
 			self.GRU_update = GRU_update
 
 		self.z0_diffeq_solver = z0_diffeq_solver
@@ -196,7 +196,17 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		self.input_dim = input_dim
 		self.device = device
 		self.extra_info = None
-
+		self.mask = mask
+		self.static_encoder = nn.Sequential(
+            nn.Linear(3, 64),
+            nn.Tanh(),
+            nn.Linear(64, self.latent_dim)
+        )
+		# self.static_encoder = nn.Sequential(
+        #     nn.Linear(6, 64),
+        #     nn.Tanh(),
+        #     nn.Linear(64, self.latent_dim)
+        # )
 		self.transform_z0 = nn.Sequential(
 		   nn.Linear(latent_dim * 2, 100),
 		   nn.Tanh(),
@@ -204,12 +214,12 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		utils.init_network_weights(self.transform_z0)
 
 
-	def forward(self, data, time_steps, run_backwards = True, save_info = False):
+	def forward(self, data, time_steps, static = None, run_backwards = True, save_info = False):
 		# data, time_steps -- observations and their time stamps
 		# IMPORTANT: assumes that 'data' already has mask concatenated to it 
 		assert(not torch.isnan(data).any())
 		assert(not torch.isnan(time_steps).any())
-
+		
 		n_traj, n_tp, n_dims = data.size()
 		if len(time_steps) == 1:
 			prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(self.device)
@@ -220,11 +230,9 @@ class Encoder_z0_ODE_RNN(nn.Module):
 			last_yi, last_yi_std = self.GRU_update(prev_y, prev_std, xi)
 			extra_info = None
 		else:
-			
 			last_yi, last_yi_std, _, extra_info = self.run_odernn(
-				data, time_steps, run_backwards = run_backwards,
+				data, time_steps, static, run_backwards = run_backwards,
 				save_info = save_info)
-
 		means_z0 = last_yi.reshape(1, n_traj, self.latent_dim)
 		std_z0 = last_yi_std.reshape(1, n_traj, self.latent_dim)
 
@@ -236,7 +244,7 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		return mean_z0, std_z0
 
 
-	def run_odernn(self, data, time_steps, 
+	def run_odernn(self, data, time_steps, static = None,
 		run_backwards = True, save_info = False):
 		# IMPORTANT: assumes that 'data' already has mask concatenated to it 
 
@@ -246,10 +254,12 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		t0 = time_steps[-1]
 		if run_backwards:
 			t0 = time_steps[0]
-
 		device = get_device(data)
-
-		prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
+		if static == None:
+			prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
+		else:
+			# prev_y = torch.zeros((1, n_traj, self.latent_dim)).to(device)
+			prev_y = self.static_encoder(static).unsqueeze(0)
 		prev_std = torch.zeros((1, n_traj, self.latent_dim)).to(device)
 
 		prev_t, t_i = time_steps[-1] + 0.01,  time_steps[-1]
@@ -267,7 +277,6 @@ class Encoder_z0_ODE_RNN(nn.Module):
 		time_points_iter = range(0, len(time_steps))
 		if run_backwards:
 			time_points_iter = reversed(time_points_iter)
-
 		for i in time_points_iter:
 			if (prev_t - t_i) < minimum_step:
 				time_points = torch.stack((prev_t, t_i))
@@ -295,8 +304,7 @@ class Encoder_z0_ODE_RNN(nn.Module):
 
 			yi_ode = ode_sol[:, :, -1, :]
 			xi = data[:,i,:].unsqueeze(0)
-			
-			yi, yi_std = self.GRU_update(yi_ode, prev_std, xi)
+			yi, yi_std = self.GRU_update(yi_ode, prev_std, xi, masked_update = self.mask)
 
 			prev_y, prev_std = yi, yi_std			
 			prev_t, t_i = time_steps[i],  time_steps[i-1]
@@ -310,7 +318,6 @@ class Encoder_z0_ODE_RNN(nn.Module):
 				extra_info.append(d)
 
 		latent_ys = torch.stack(latent_ys, 1)
-
 		assert(not torch.isnan(yi).any())
 		assert(not torch.isnan(yi_std).any())
 

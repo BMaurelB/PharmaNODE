@@ -11,15 +11,16 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import relu
 
-import lib.utils as utils
-from lib.utils import get_device
-from lib.encoder_decoder import *
-from lib.likelihood_eval import *
+from . import utils
+from .utils import get_device
+from .encoder_decoder import *
+from .likelihood_eval import *
+from .base_models import VAE_Baseline
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.normal import Normal
 from torch.distributions import kl_divergence, Independent
-from lib.base_models import VAE_Baseline
+
 
 
 
@@ -30,7 +31,8 @@ class LatentODE(VAE_Baseline):
 		linear_classifier = False,
 		classif_per_tp = False,
 		n_labels = 1,
-		train_classif_w_reconstr = False):
+		train_classif_w_reconstr = False,
+		dose_encoding_net = None):
 
 		super(LatentODE, self).__init__(
 			input_dim = input_dim, latent_dim = latent_dim, 
@@ -47,19 +49,27 @@ class LatentODE(VAE_Baseline):
 		self.diffeq_solver = diffeq_solver
 		self.decoder = decoder
 		self.use_poisson_proc = use_poisson_proc
+		if dose_encoding_net:
+			self.dose_encoding_net = dose_encoding_net
 
 	def get_reconstruction(self, time_steps_to_predict, truth, truth_time_steps, 
-		mask = None, n_traj_samples = 1, run_backwards = True, mode = None):
+		mask = None, n_traj_samples = 1, run_backwards = True, mode = None, dose = None, static = None):
 
 		if isinstance(self.encoder_z0, Encoder_z0_ODE_RNN) or \
 			isinstance(self.encoder_z0, Encoder_z0_RNN):
-
 			truth_w_mask = truth
 			if mask is not None:
 				truth_w_mask = torch.cat((truth, mask), -1)
+				# truth_w_mask = torch.cat((truth_w_mask, dose), -1)
+			elif dose is not None:
+				try:
+					truth_w_mask = torch.cat((truth, dose), -1)
+				except:
+					import pdb; pdb.set_trace()
+				# static = torch.cat((dose, static), -1)
+			
 			first_point_mu, first_point_std = self.encoder_z0(
-				truth_w_mask, truth_time_steps, run_backwards = run_backwards)
-
+				truth_w_mask, truth_time_steps, static = static, run_backwards = run_backwards)
 			means_z0 = first_point_mu.repeat(n_traj_samples, 1, 1)
 			sigma_z0 = first_point_std.repeat(n_traj_samples, 1, 1)
 			first_point_enc = utils.sample_standard_gaussian(means_z0, sigma_z0)

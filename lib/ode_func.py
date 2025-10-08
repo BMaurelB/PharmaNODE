@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.spectral_norm import spectral_norm
 
-import lib.utils as utils
+from . import utils
 
 #####################################################################################################
 
@@ -110,6 +110,48 @@ class ODEFunc_w_Poisson(ODEFunc):
 
 		log_lam = log_lam - torch.log(self.const_for_lambda)
 		return torch.cat((dydt_dldt, torch.exp(log_lam)),-1)
+	
+	#####################################################################################################
+
+class ODEFunc_with_static(nn.Module):
+	def __init__(self, input_dim, latent_dim, ode_func_net, device = torch.device("cpu")):
+		"""
+		input_dim: dimensionality of the input
+		latent_dim: dimensionality used for ODE. Analog of a continous latent state
+		"""
+		super(ODEFunc, self).__init__()
+
+		self.input_dim = input_dim
+		self.device = device
+
+		utils.init_network_weights(ode_func_net)
+		self.gradient_net = ode_func_net
+
+	def forward(self, t_local, y, static, backwards = False):
+		"""
+		Perform one step in solving ODE. Given current data point y and current time point t_local, returns gradient dy/dt at this time point
+
+		t_local: current time point
+		y: value at the current time point
+		"""
+		grad = self.get_ode_gradient_nn(t_local, y, static)
+		if backwards:
+			grad = -grad
+		return grad
+
+	def get_ode_gradient_nn(self, t_local, y, static):
+		try:
+			y = torch.cat(y, static, axis = 1)
+		except:
+			import pdb; pdb.set_trace()
+		return self.gradient_net(y)
+
+	def sample_next_point_from_prior(self, t_local, y, static):
+		"""
+		t_local: current time point
+		y: value at the current time point
+		"""
+		return self.get_ode_gradient_nn(t_local, y, static)
 
 
 

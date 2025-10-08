@@ -131,7 +131,7 @@ def subsample_timepoints(data, time_steps, mask, n_tp_to_sample = None):
 			data[i, missing_idx] = 0.
 			if mask is not None:
 				mask[i, missing_idx] = 0.
-	
+				
 	elif (n_tp_to_sample <= 1) and (n_tp_to_sample > 0):
 		# Subsample percentage of points from each time series
 		percentage_tp_to_sample = n_tp_to_sample
@@ -208,35 +208,98 @@ def split_train_test_data_and_time(data, time_steps, train_fraq = 0.8):
 
 	return data_train, data_test, train_time_steps, test_time_steps
 
+import random
+def split_train_test_list_dict(list_dict, train_fraq = 0.8, shuffle = True):
+	# Handle the case where input is a single dictionary
+	if isinstance(list_dict, dict):
+		list_dict = [list_dict]
+	train_keys = []
+	test_keys = []
+	for dictio in list_dict:
+		if shuffle:
+			keys = sorted(dictio.keys())
+			random.shuffle(keys)
+		else: 
+			keys = list(dictio.keys())
+		split_idx = int(len(keys) * train_fraq)
+		_train_keys = keys[:split_idx]
+		_test_keys = keys[split_idx:]
+		train_keys.extend(_train_keys)
+		test_keys.extend(_test_keys)
+	return train_keys, test_keys
 
+def virtual_train_test_list_dict(list_dict, train_fraq = 0.8):
+	# Handle the case where input is a single dictionary
+	if isinstance(list_dict, dict):
+		list_dict = [list_dict]
+	train_keys = []
+	test_keys = []
+	for dictio in list_dict:
+		keys = list(dictio.keys())
+		split_idx = int(len(keys) * train_fraq)
+		_train_keys = keys[:split_idx]
+		_test_keys = keys[split_idx:]
+		train_keys.extend(_train_keys)
+		test_keys.extend(_test_keys)
+	return train_keys, test_keys
+
+def split_train_test_list(data_list, train_fraq=0.8):
+        # data_list is expected to be a list of (trajectory, time_steps) tuples
+        n_total = len(data_list)
+        n_train = int(n_total * train_fraq)
+        
+        # Ensure reproducibility for the split if desired, by shuffling with a fixed seed
+        # For simplicity, just slicing. For a real scenario, shuffle first.
+        # random.shuffle(data_list) # Optionally shuffle before splitting
+        
+        train_data = data_list[:n_train]
+        test_data = data_list[n_train:]
+        return train_data, test_data
 
 def get_next_batch(dataloader):
 	# Make the union of all time points and perform normalization across the whole dataset
 	data_dict = dataloader.__next__()
-
 	batch_dict = get_dict_template()
-
 	# remove the time points where there are no observations in this batch
 	non_missing_tp = torch.sum(data_dict["observed_data"],(0,2)) != 0.
 	batch_dict["observed_data"] = data_dict["observed_data"][:, non_missing_tp]
-	batch_dict["observed_tp"] = data_dict["observed_tp"][non_missing_tp]
-
+	# batch_dict["observed_tp"] = data_dict["observed_tp"][:,non_missing_tp]
+	batch_dict["observed_tp"] = data_dict["observed_tp"]
 	# print("observed data")
 	# print(batch_dict["observed_data"].size())
 
 	if ("observed_mask" in data_dict) and (data_dict["observed_mask"] is not None):
-		batch_dict["observed_mask"] = data_dict["observed_mask"][:, non_missing_tp]
+		# batch_dict["observed_mask"] = data_dict["observed_mask"][:, non_missing_tp]
+		batch_dict["observed_mask"] = data_dict["observed_mask"]
 
 	batch_dict[ "data_to_predict"] = data_dict["data_to_predict"]
 	batch_dict["tp_to_predict"] = data_dict["tp_to_predict"]
-
+	
 	non_missing_tp = torch.sum(data_dict["data_to_predict"],(0,2)) != 0.
-	batch_dict["data_to_predict"] = data_dict["data_to_predict"][:, non_missing_tp]
-	batch_dict["tp_to_predict"] = data_dict["tp_to_predict"][non_missing_tp]
+
+	# batch_dict["data_to_predict"] = data_dict["data_to_predict"][:, non_missing_tp]
+	# batch_dict["tp_to_predict"] = data_dict["tp_to_predict"][non_missing_tp]
 
 	# print("data_to_predict")
 	# print(batch_dict["data_to_predict"].size())
+	if 'params' in data_dict:
+		batch_dict['params'] = data_dict['params']
 
+	if 'dose' in data_dict:
+		if 'age' in data_dict:
+			batch_dict['age']= data_dict['age']
+			batch_dict['crea']= data_dict['crea']
+			batch_dict['cort']= data_dict['cort']
+		batch_dict['dose']= data_dict['dose']
+		batch_dict['static']= data_dict['static']
+		batch_dict['others']= data_dict['others']
+		batch_dict['auc_be']= data_dict['auc_be']
+		batch_dict['auc_red']= data_dict['auc_red']
+		batch_dict["y_true_times"]= data_dict["y_true_times"]
+		batch_dict['dataset_number']= data_dict['dataset_number']
+		batch_dict['patient_id']= data_dict['patient_id']
+		
+		
 	if ("mask_predicted_data" in data_dict) and (data_dict["mask_predicted_data"] is not None):
 		batch_dict["mask_predicted_data"] = data_dict["mask_predicted_data"][:, non_missing_tp]
 
@@ -252,7 +315,7 @@ def get_ckpt_model(ckpt_path, model, device):
 	if not os.path.exists(ckpt_path):
 		raise Exception("Checkpoint " + ckpt_path + " does not exist.")
 	# Load checkpoint.
-	checkpt = torch.load(ckpt_path)
+	checkpt = torch.load(ckpt_path, weights_only = False)
 	ckpt_args = checkpt['args']
 	state_dict = checkpt['state_dict']
 	model_dict = model.state_dict()
@@ -305,7 +368,6 @@ def create_net(n_inputs, n_outputs, n_layers = 1,
 	layers.append(nonlinear())
 	layers.append(nn.Linear(n_units, n_outputs))
 	return nn.Sequential(*layers)
-
 
 def get_item_from_pickle(pickle_file, item_name):
 	from_pickle = load_pickle(pickle_file)
@@ -391,6 +453,9 @@ def split_data_extrap(data_dict, dataset = ""):
 	split_dict["mask_predicted_data"] = None 
 	split_dict["labels"] = None 
 
+	if 'params' in data_dict:
+		split_dict['params'] = data_dict['params']
+
 	if ("mask" in data_dict) and (data_dict["mask"] is not None):
 		split_dict["observed_mask"] = data_dict["mask"][:, :n_observed_tp].clone()
 		split_dict["mask_predicted_data"] = data_dict["mask"][:, n_observed_tp:].clone()
@@ -416,6 +481,9 @@ def split_data_interp(data_dict):
 	split_dict["observed_mask"] = None 
 	split_dict["mask_predicted_data"] = None 
 	split_dict["labels"] = None 
+
+	if 'params' in data_dict:
+		split_dict['params'] = data_dict['params']
 
 	if "mask" in data_dict and data_dict["mask"] is not None:
 		split_dict["observed_mask"] = data_dict["mask"].clone()
@@ -468,6 +536,8 @@ def subsample_observed_data(data_dict, n_tp_to_sample = None, n_points_to_cut = 
 	new_data_dict["observed_tp"] = time_steps.clone()
 	new_data_dict["observed_mask"] = mask.clone()
 
+	if 'params' in data_dict:
+		new_data_dict['params'] = data_dict['params']
 	if n_points_to_cut is not None:
 		# Cut the section in the data to predict as well
 		# Used only for the demo on the periodic function
@@ -515,30 +585,29 @@ def compute_loss_all_batches(model,
 	test_dataloader, args,
 	n_batches, experimentID, device,
 	n_traj_samples = 1, kl_coef = 1., 
-	max_samples_for_eval = None):
+	max_samples_for_eval = None, data_obj = None):
 
 	total = {}
 	total["loss"] = 0
 	total["likelihood"] = 0
 	total["mse"] = 0
+	total['mse_cond'] = torch.tensor([0.0,0.0,0.0,0.0])
 	total["kl_first_p"] = 0
 	total["std_first_p"] = 0
 	total["pois_likelihood"] = 0
 	total["ce_loss"] = 0
-
+	total['rmse_auc'] = 0
 	n_test_batches = 0
 	
 	classif_predictions = torch.Tensor([]).to(device)
 	all_test_labels =  torch.Tensor([]).to(device)
 
 	for i in range(n_batches):
-		print("Computing loss... " + str(i))
-		
+		# print("Computing loss... " + str(i))
 		batch_dict = get_next_batch(test_dataloader)
-
-		results  = model.compute_all_losses(batch_dict,
-			n_traj_samples = n_traj_samples, kl_coef = kl_coef)
-
+		
+		results  = model.compute_all_losses(batch_dict,n_traj_samples = n_traj_samples, kl_coef = kl_coef, max_out = data_obj['max_out'])
+		
 		if args.classif:
 			n_labels = model.n_labels #batch_dict["labels"].size(-1)
 			n_traj_samples = results["label_predictions"].size(0)

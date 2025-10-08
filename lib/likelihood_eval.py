@@ -12,10 +12,10 @@ import torch
 import torch.nn as nn
 from torch.nn.functional import relu
 
-import lib.utils as utils
-from lib.utils import get_device
-from lib.encoder_decoder import *
-from lib.likelihood_eval import *
+from . import utils
+from .utils import get_device
+from .encoder_decoder import *
+from .likelihood_eval import *
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.normal import Normal
@@ -141,13 +141,12 @@ def compute_multiclass_CE_loss(label_predictions, true_label, mask):
 def compute_masked_likelihood(mu, data, mask, likelihood_func):
 	# Compute the likelihood per patient and per attribute so that we don't priorize patients with more measurements
 	n_traj_samples, n_traj, n_timepoints, n_dims = data.size()
-
 	res = []
+	mask = mask.permute(0, 2, 3, 1)
 	for i in range(n_traj_samples):
 		for k in range(n_traj):
 			for j in range(n_dims):
 				data_masked = torch.masked_select(data[i,k,:,j], mask[i,k,:,j].bool())
-				
 				#assert(torch.sum(data_masked == 0.) < 10)
 
 				mu_masked = torch.masked_select(mu[i,k,:,j], mask[i,k,:,j].bool())
@@ -201,6 +200,11 @@ def mse(mu, data, indices = None):
 
 	if n_data_points > 0:
 		mse = nn.MSELoss()(mu, data)
+		# epsilon = 1e-8
+		# # Calculate the element-wise relative squared error
+		# relative_squared_error = ((mu - data) / (data + epsilon)) ** 2
+		# # Compute the mean to get the final loss
+		# mse = torch.mean(relative_squared_error)
 	else:
 		mse = torch.zeros([1]).to(get_device(data)).squeeze()
 	return mse

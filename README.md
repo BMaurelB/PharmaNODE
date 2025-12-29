@@ -1,7 +1,7 @@
-# Improved Tacrolimus AUC Prediction UsingNeural Ordinary Differential Equations
+# Latent ODEs for Robust and Flexible Tacrolimus AUC Prediction from Sparse Data
 
 Code for the paper:
-> Benjamin Maurel, . "Improved Tacrolimus AUC Prediction UsingNeural Ordinary Differential Equations" (2025)
+> Benjamin Maurel, . "Latent ODEs for Robust and Flexible Tacrolimus AUC Prediction from Sparse Data" (2025)
 [[arxiv]]
 
 <p align="center">

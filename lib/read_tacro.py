@@ -551,7 +551,7 @@ def extract_pccp_tac(file_path = "/Users/benjaminmaurel/Downloads/mr4_tls_pccp.c
     return data_dict, [max_out, best_lambda]
 
 # def extract_gen_tac(file_path = "virtual_cohort.csv", plot = True):
-def extract_gen_tac(file_path = ["virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot = False, exp = None):
+def extract_gen_tac(file_path = ["virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot = True, exp = None):
 # def extract_gen_tac(file_path = ["exp_run_all/26126/virtual_cohort_train.csv", "virtual_cohort_test.csv"], plot = False, exp = None):
     data_dict = {}
     if exp:
@@ -684,22 +684,21 @@ def extract_gen_tac(file_path = ["virtual_cohort_train.csv", "virtual_cohort_tes
                     'auc_be': torch.tensor(auc_be),
                     'auc_red' : torch.tensor(auc/max_out)}
                 
-    if plot:
-        # Plot OUT vs TIME for each subject
-        plt.figure(figsize=(10, 6))
-        plt.hist(aucs, bins = 20)
-        # for subject_id, group in data_dict.items():
-        #     if group['values_val'].max() > 0.1:
-        #         print(subject_id)
-        #         plt.plot(group['times_val'], group['values_val'], marker='o', label=f'ID {(subject_id)}')
+    # if plot:
+    #     # Plot OUT vs TIME for each subject
+    #     # plt.figure(figsize=(10, 6))
+    #     # plt.hist(aucs, bins = 20)
+    #     for subject_id, group in data_dict.items():
+    #         print(subject_id)
+    #         plt.plot(group['times_val'], group['values_val'], marker='o', label=f'ID {(subject_id)}')
         
-        # plt.title('PK Data: OUT vs TIME by Subject')
-        # plt.xlabel('Time')
-        # plt.ylabel('Concentration (OUT)')
-        # plt.legend(title='Subject ID', bbox_to_anchor=(1.05, 1), loc='upper left')
-        # plt.tight_layout()
-        # plt.grid(True)
-        plt.show()
+    #     plt.title('PK Data: OUT vs TIME by Subject')
+    #     plt.xlabel('Time')
+    #     plt.ylabel('Concentration (OUT)')
+    #     plt.legend(title='Subject ID', bbox_to_anchor=(1.05, 1), loc='upper left')
+    #     plt.tight_layout()
+    #     plt.grid(True)
+    #     plt.show()
 
     return data_dict, [max_out, best_lambda]
 

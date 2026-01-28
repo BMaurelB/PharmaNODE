@@ -186,7 +186,7 @@ def parse_datasets(args, device):
 					# Get the correct function from the map
 					extract_function = available_datasets[name]
 					# Call the function and get the results
-					data_dict, max_out_value = extract_function(plot=False, exp = args.experiment)
+					data_dict, max_out_value = extract_function(plot=True, exp = args.experiment)
 					if name not in datasets_to_load_train:
 						dict_list.append(data_dict)
 					dataset_obj.update(data_dict) # Merge dictionaries
